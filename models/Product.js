@@ -8,6 +8,8 @@ const productSchema = new mongoose.Schema({
   priceLRD: { type: Number },
   priceUSD: { type: Number },
   pieces: { type: Number },
+  totalLRD: { type: Number },
+  totalUSD: { type: Number },
   cts: { type: Number },
   store: {
     type: String,
@@ -20,5 +22,18 @@ const productSchema = new mongoose.Schema({
 
 // Create a compound index for item and store to ensure unique items per store
 productSchema.index({ item: 1, store: 1 }, { unique: true });
+
+// Pre-save middleware to calculate totals
+productSchema.pre('save', function(next) {
+  if (this.pieces && this.priceLRD) {
+    this.totalLRD = this.pieces * this.priceLRD;
+  }
+  
+  if (this.pieces && this.priceUSD) {
+    this.totalUSD = this.pieces * this.priceUSD;
+  }
+  
+  next();
+});
 
 module.exports = mongoose.model('Product', productSchema);
