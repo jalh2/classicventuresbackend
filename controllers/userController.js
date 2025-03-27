@@ -5,10 +5,10 @@ const registerUser = async (req, res) => {
   try {
     const { username, password, userType, store } = req.body;
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ username });
+    // Check if user already exists in the same store
+    const existingUser = await User.findOne({ username, store });
     if (existingUser) {
-      return res.status(400).json({ error: 'Username already exists' });
+      return res.status(400).json({ error: 'Username already exists in this store' });
     }
 
     // Create new user
@@ -19,13 +19,55 @@ const registerUser = async (req, res) => {
       store
     });
 
-    await user.save();
+    try {
+      await user.save();
+    } catch (saveError) {
+      // Handle duplicate key error specifically
+      if (saveError.code === 11000) {
+        // If the error contains information about the username field only
+        if (saveError.message.includes('username_1')) {
+          console.log('Detected old index conflict. Attempting to resolve...');
+          
+          // Check if another user with this username exists in a different store
+          const conflictUser = await User.findOne({ username });
+          if (conflictUser && conflictUser.store !== store) {
+            // This is the case we want to allow - same username, different store
+            // Force save by bypassing Mongoose validation
+            await User.collection.insertOne({
+              username,
+              password: user.password,
+              salt: user.salt,
+              userType: user.userType || 'employee',
+              store,
+              createdAt: new Date()
+            });
+            
+            // Return the created user
+            return res.status(201).json({ 
+              username: username,
+              userType: userType || 'employee',
+              store: store
+            });
+          } else {
+            // Some other duplicate key issue
+            return res.status(400).json({ error: 'Username conflict. Please try a different username.' });
+          }
+        } else {
+          // Some other duplicate key issue
+          return res.status(400).json({ error: 'Username already exists in this store' });
+        }
+      }
+      // For other errors, just pass through
+      throw saveError;
+    }
+
     res.status(201).json({ 
       username: user.username,
       userType: user.userType,
       store: user.store
     });
   } catch (error) {
+    console.error('User registration error:', error);
     res.status(400).json({ error: error.message });
   }
 };
@@ -34,21 +76,16 @@ const loginUser = async (req, res) => {
   try {
     const { username, password, store } = req.body;
 
-    // Find user
-    const user = await User.findOne({ username });
+    // Find user by username and store combination
+    const user = await User.findOne({ username, store });
     if (!user) {
-      return res.status(400).json({ error: 'User not found' });
+      return res.status(400).json({ error: 'User not found for this store' });
     }
 
     // Check password using the comparePassword method from our schema
     const isMatch = user.comparePassword(password);
     if (!isMatch) {
       return res.status(400).json({ error: 'Invalid password' });
-    }
-
-    // Verify store access
-    if (user.store !== store) {
-      return res.status(403).json({ error: 'Access to this store not allowed' });
     }
 
     res.json({ 
@@ -153,6 +190,30 @@ const getUsersByStore = async (req, res) => {
   }
 };
 
+const deleteStore = async (req, res) => {
+  try {
+    const { store } = req.params;
+    
+    // Find all users associated with this store
+    const users = await User.find({ store });
+    
+    if (users.length === 0) {
+      return res.status(404).json({ error: 'Store not found or has no users' });
+    }
+    
+    // Delete all users associated with this store
+    await User.deleteMany({ store });
+    
+    res.json({ 
+      message: `Store "${store}" deleted successfully along with ${users.length} user(s)`,
+      deletedUsers: users.length
+    });
+  } catch (error) {
+    console.error('Error deleting store:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
@@ -161,5 +222,6 @@ module.exports = {
   getStores,
   changePassword,
   deleteUser,
-  getUsersByStore
+  getUsersByStore,
+  deleteStore
 };

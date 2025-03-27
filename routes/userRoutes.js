@@ -8,7 +8,8 @@ const {
   getStores,
   changePassword,
   deleteUser,
-  getUsersByStore
+  getUsersByStore,
+  deleteStore
 } = require('../controllers/userController');
 
 // Public routes
@@ -22,5 +23,6 @@ router.get('/users', getUsers);
 router.put('/users/:userId/type', updateUserType);
 router.put('/users/:userId/password', changePassword);
 router.delete('/users/:userId', deleteUser);
+router.delete('/stores/:store', deleteStore);
 
 module.exports = router;
