@@ -36,6 +36,7 @@ const getProducts = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const store = req.query.store;
     const lowStock = req.query.lowStock === 'true';
+    const itemName = req.query.itemName;
     const skip = (page - 1) * limit;
 
     if (!store) {
@@ -44,6 +45,11 @@ const getProducts = async (req, res) => {
 
     // Build query
     const query = { store };
+
+    // Add item name filter if provided
+    if (itemName) {
+      query.item = { $regex: itemName, $options: 'i' }; // Case-insensitive search
+    }
     
     // Add low stock filter if requested
     if (lowStock) {
