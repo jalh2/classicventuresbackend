@@ -33,10 +33,12 @@ const createProduct = async (req, res) => {
 const getProducts = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = parseInt(req.query.limit) || 40;
     const store = req.query.store;
     const lowStock = req.query.lowStock === 'true';
-    const itemName = req.query.itemName;
+    const searchTerm = req.query.search || ''; // New: search term
+    const sortBy = req.query.sortBy || 'createdAt'; // New: sort field, default to createdAt
+    const sortOrder = req.query.sortOrder || 'desc'; // New: sort order, default to desc
     const skip = (page - 1) * limit;
 
     if (!store) {
@@ -46,9 +48,10 @@ const getProducts = async (req, res) => {
     // Build query
     const query = { store };
 
-    // Add item name filter if provided
-    if (itemName) {
-      query.item = { $regex: itemName, $options: 'i' }; // Case-insensitive search
+    // Add search term filter if provided
+    if (searchTerm) {
+      query.item = { $regex: searchTerm, $options: 'i' }; // Case-insensitive search on 'item' field
+      console.log('Backend search query for item:', query.item); // Debugging log
     }
     
     // Add low stock filter if requested
@@ -56,16 +59,23 @@ const getProducts = async (req, res) => {
       query.pieces = { $lte: 7 };
     }
 
+    // Build sort options
+    const sortOptions = {};
+    sortOptions[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
     // Get total count for pagination with store filter
     const totalCount = await Product.countDocuments(query);
     const totalPages = Math.ceil(totalCount / limit);
 
     // Get paginated products for specific store
     const products = await Product.find(query)
-      .sort({ createdAt: -1 })
+      .collation({ locale: 'en', strength: 2 }) // Add collation for natural alphabetical sort
+      .sort(sortOptions)
       .skip(lowStock ? 0 : skip) // Skip pagination for low stock items to show all of them
       .limit(lowStock ? 100 : limit); // Use higher limit for low stock items
     
+    console.log('Products returned by DB:', products.map(p => p.item)); // Debugging log
+
     // Get transactions for each product to calculate totals
     const productsWithTotals = await Promise.all(products.map(async (product) => {
       const transactions = await Transaction.find({
