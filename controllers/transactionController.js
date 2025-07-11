@@ -3,6 +3,37 @@ const Product = require('../models/Product');
 
 // Transaction controller methods will be added here
 
+// Reverse a transaction
+const reverseTransaction = async (req, res) => {
+  try {
+    const transaction = await Transaction.findById(req.params.id);
+
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    if (transaction.status === 'cancelled') {
+      return res.status(400).json({ error: 'Transaction is already cancelled' });
+    }
+
+    // Update transaction status
+    transaction.status = 'cancelled';
+
+    // Restore product quantities
+    for (const item of transaction.productsSold) {
+      await Product.findByIdAndUpdate(item.product, {
+        $inc: { pieces: item.quantity }
+      });
+    }
+
+    await transaction.save();
+
+    res.status(200).json({ message: 'Transaction reversed successfully', transaction });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to reverse transaction', details: error.message });
+  }
+};
+
 const createTransaction = async (req, res) => {
   try {
     const { productsSold, currency, store } = req.body;
@@ -69,7 +100,7 @@ const getTransactions = async (req, res) => {
       return res.status(400).json({ error: 'Store parameter is required' });
     }
 
-    const transactions = await Transaction.find({ store })
+    const transactions = await Transaction.find({ store, status: 'completed' })
       .sort({ date: -1 })
       .limit(50);
     res.json(transactions);
@@ -113,6 +144,7 @@ const getTransactionsByDate = async (req, res) => {
 
     const transactions = await Transaction.find({
       store,
+      status: 'completed',
       date: {
         $gte: startDate,
         $lte: endDate
@@ -128,11 +160,11 @@ const getTransactionsByDate = async (req, res) => {
 const getTransactionsByProduct = async (req, res) => {
   try {
     const { productId, store } = req.params;
-    const transactions = await Transaction.find({
+    const transactions = await Transaction.find({ 
       'productsSold.product': productId,
       store,
-      type: 'sale'
-    }).populate('productsSold.product');
+      status: 'completed'
+    }).sort({ date: -1 }).populate('productsSold.product');
 
     // Calculate totals
     const totals = transactions.reduce((acc, transaction) => {
@@ -157,6 +189,7 @@ const getTransactionsByProduct = async (req, res) => {
 const getTransactionsByDateRange = async (req, res) => {
   try {
     const { startDate, endDate, store } = req.query;
+    console.log('[Backend] Received request for date range:', { startDate, endDate, store });
     
     if (!store) {
       return res.status(400).json({ error: 'Store parameter is required' });
@@ -168,13 +201,21 @@ const getTransactionsByDateRange = async (req, res) => {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
-    const transactions = await Transaction.find({
+    const query = {
       store,
+      $or: [
+        { status: 'completed' },
+        { status: { $exists: false } }
+      ],
       date: {
         $gte: start,
         $lte: end
       }
-    }).sort({ date: -1 });
+    };
+    console.log('[Backend] Executing database query:', query);
+
+    const transactions = await Transaction.find(query).sort({ date: -1 });
+    console.log(`[Backend] Found ${transactions.length} transactions.`);
 
     // Calculate totals
     let totalLRD = 0;
@@ -192,15 +233,7 @@ const getTransactionsByDateRange = async (req, res) => {
       });
     });
 
-    res.json({
-      transactions,
-      summary: {
-        totalLRD,
-        totalUSD,
-        totalItems,
-        transactionCount: transactions.length
-      }
-    });
+    res.json(transactions);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -223,6 +256,10 @@ const getSalesReport = async (req, res) => {
     // Build query based on whether we want all stores or a specific store
     const query = {
       type: 'sale',
+      $or: [
+        { status: 'completed' },
+        { status: { $exists: false } }
+      ],
       date: {
         $gte: start,
         $lte: end
@@ -352,7 +389,8 @@ const getTopProducts = async (req, res) => {
         $match: {
           date: { $gte: start, $lte: end },
           store,
-          type: 'sale'
+          type: 'sale',
+          status: 'completed'
         }
       },
       { $unwind: '$productsSold' },
@@ -402,5 +440,6 @@ module.exports = {
   getTransactionsByProduct,
   getTransactionsByDateRange,
   getSalesReport,
-  getTopProducts
+  getTopProducts,
+  reverseTransaction
 };

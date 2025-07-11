@@ -23,6 +23,9 @@ router.get('/product/:productId/:store', transactionController.getTransactionsBy
 // Get transactions by date (must come before /:id)
 router.get('/date/:date', transactionController.getTransactionsByDate);
 
+// Reverse a specific transaction
+router.put('/:id/reverse', transactionController.reverseTransaction);
+
 // Get a specific transaction (must come last)
 router.get('/:id', transactionController.getTransactionById);
 
